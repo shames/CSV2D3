@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html ng-app="myApp">
+
+  <head lang="en">
+
+    <meta charset="utf-8" />
+    <title>Machine CSV2D3</title>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.4.0/angular.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/PapaParse/4.1.1/papaparse.min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/angular-file-upload/1.1.5/angular-file-upload.min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+
+  </head>
+
+  <body ng-controller="MyCtrl">
+
+    <!--Radio button for sunburst-->
+
+    <div id="legend">
+      <div id="sequence"></div>
+      <label><input type="radio" name="mode" value="count" checked> Reference</label>
+      <label><input type="radio" name="mode" value="size" > Valorisation</label><br/>
+    </div>
+
+
+    <div id="data">
+
+        <div id="source_csv"> <!--PARTIE CSV SOURCE-->
+          <h1>CSV</h1>
+
+          <div>
+            <input type="checkbox" ng-model="append"> Concatener les données si Drag/Drop
+          </div>
+
+          <div class="drop-container" nv-file-drop nv-file-over uploader="uploader">
+            <textarea id="csv" ng-model="csv" placeholder="Copier/Coller un TCD depuis Excel ou coller votre CSV ici"></textarea>
+          </div>
+
+        </div>
+
+
+        <div id=resultats_flare> <!--PARTIE FLARE JSON-->
+          <h1>D3 Flare JSON</h1>
+
+          <!--Option de compactage-->
+
+          <div id="option">
+          <input name="updateButton"
+                 type="button"
+                 value="Update"
+                 onclick="refreshGraph()" />
+          </div>
+
+          <div>
+            <input type="checkbox" ng-model="compact" > Compact
+          </div>
+
+          <!--Options de hierarchie-->
+          <div>
+            <input type="text" ng-model="tags.root" placeholder="root tag">
+            <input type="text" ng-model="tags.parent" placeholder="parent tag">
+            <input type="text" ng-model="tags.children" placeholder="children tag">
+            <input type="text" ng-model="tags.leaf" placeholder="leaf tag">
+            <input type="text" ng-model="tags.size" placeholder="size tag">
+          </div>
+
+          <!--Cadre resultats FLARE.JSON-->
+          <textarea id="resultats" readonly ng-model="json"></textarea>
+
+        </div>
+
+     </div>
+
+
+  </body>
+
+</html>
+
+<style>
+
+  .drop-container {
+    padding: 5px;
+  }
+
+  .nv-file-over {
+    position: relative;
+    border: dashed 3px green;
+  }
+
+  #data{
+    top: 30px;
+    float: right;
+    width:45%;
+  }
+
+  #source_csv {
+    top: 10px;
+    width: 100%;
+    height: 300px;
+    padding: 10px 0 0 3px;
+  }
+
+  #resultats_flare {
+    top: 10px;
+    width: 100%;
+    height: 50px;
+    padding: 10px 0 0 3px;
+  }
+
+  #sequence {
+    float : left;
+    width: 100%;
+    height: 30px;
+  }
+
+  #legend {
+    float: left;
+    top: 10px;
+    width: 400px;
+    padding: 10px 0 0 3px;
+  }
+
+  path {
+    stroke: #fff;
+    fill-rule: evenodd;
+  }
+
+  text {
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+  }
+
+  textarea {
+    width: 100%;
+    height: 200px;
+    font-family: monospace;
+  }
+
+</style>
+
+<script>
+
+var node = "";
+var root = "";
+
+angular.module('myApp', ['angularFileUpload'])
+
+.factory('FlareJson', ['$q', function($q) {
+
+  function updateTree(curr, arr, tags) {
+    if ((arr.length || 0) < 2) {
+      return;
+    }
+
+    if (!curr.hasOwnProperty(tags.children)) {
+      curr[tags.children] = [];
+    }
+
+    var elem;
+    if (arr.length == 2) {
+      elem = {};
+      elem[tags.leaf] = arr[0];
+      elem[tags.size] = arr[1];
+      curr[tags.children].push(elem);
+    } else {
+      curr[tags.children].some(function(e) {
+        if (e[tags.parent] == arr[0] || e[tags.leaf] == arr[0]) {
+          elem = e;
+          return true;
+        }
+      });
+      if (!elem) {
+        elem = {};
+        elem[tags.parent] = arr[0];
+        curr[tags.children].push(elem);
+      }
+      updateTree(elem, arr.slice(1), tags);
+    }
+  }
+
+  function buildJson(csv, compact, tags) {
+
+    var deferred = $q.defer();
+
+    var result = {};
+    result[tags.parent] = tags.root;
+
+    Papa.parse(csv, {
+      header: false,
+      dynamicTyping: true,
+      complete: function(csvArray) {
+        csvArray.data.forEach(function(line) {
+          if (line.length) {
+            updateTree(result, line, tags);
+          }
+        });
+        if (compact) {
+          deferred.resolve(JSON.stringify(result));
+        } else {
+          deferred.resolve(JSON.stringify(result, null, 2));
+        }
+      }
+    });
+
+    return deferred.promise;
+
+  }
+
+  return buildJson;
+
+}])
+
+.controller('MyCtrl', ['$scope', 'FileUploader', 'FlareJson', function($scope, FileUploader, FlareJson) {
+
+    $scope.csv = "";
+    $scope.compact = true;
+    $scope.json = "";
+    $scope.tags = {
+      root: 'CAI',
+      parent: 'name',
+      children: 'children',
+      leaf: 'name',
+      size: 'size'
+    };
+
+    $scope.uploader = new FileUploader();
+
+    $scope.uploader.onAfterAddingFile = function(fileItem) {
+      var reader = new FileReader();
+      reader.onloadend = function(event) {
+        $scope.$apply(function() {
+          if ($scope.append) {
+            $scope.csv += event.target.result;
+          } else {
+            $scope.csv = event.target.result;
+          }
+        });
+      };
+      reader.readAsText(fileItem._file);
+    };
+
+    function update() {
+      FlareJson($scope.csv, $scope.compact, $scope.tags).then(function(json) {
+        $scope.json = json;
+        node = JSON.parse(json);
+      });
+    }
+
+    $scope.$watchGroup(['csv', 'compact'], update);
+    $scope.$watchCollection('tags', update);
+    $scope.$watchGroup(['csv','json'], refreshGraph);
+
+  }]);
+
+
+//////////////
+// SUNBURST //
+//////////////
+
+var svg = d3.selectAll("body").append("svg");
+
+function refreshGraph(){
+
+  // Total size of all segments; we set this later, after loading the data.
+  var totalSize = 0;
+
+  if (document.getElementById("csv").value == ""){
+
+    root = {"name":"CAI","children":[{"name":"LA ROCHE-POSAY","children":[{"name":"ACTIVE C","children":[{"name":"Active C contour des yeux 15 ml","size":10683736},{"name":"Active C Peaux normales à mixtes 30 ml","size":9001596},{"name":"Active C Peaux sèches 30 ml","size":12752278},{"name":"Active C XL 30 ml","size":22804208}]},{"name":"BIOMEDIC ","children":[{"name":"Biomédic Gel Nettoyant au LHA 200 ml","size":2593482},{"name":"Biomédic Sérum au LHA 30 ml","size":11235925},{"name":"Biomédic Solution Pre-Peel au LHA 200 ml","size":8644960},{"name":"Hydra Recovery 40 ml","size":1856872},{"name":"Pigment Control  ","size":9438177},{"name":"Pro Maximiser 30ml","size":11141256}]},{"name":"DERMO PEDIATRICS ","children":[{"name":"IP 40 Crème Sans parfum  100 ml","size":10784050},{"name":"IP 40 Spray Sans parfum  125 ml","size":12078248},{"name":"IP 50 Aérosol sans conservateur 125ml","size":3349374},{"name":"IP 50+ Lait 100 ml","size":6368986},{"name":"IP 50+ XL Lait Sans parfum  100 ml","size":5698134}]},{"name":"DIVERS SOINS ","children":[{"name":"Céralip 15 ml","size":8449344},{"name":"Cicaplast 40 ml","size":3061247},{"name":"Hydranorme 40 ml","size":6759918},{"name":"Lipolèvres 3 ml","size":12079231},{"name":"Physiane 40 ml","size":11891663},{"name":"Pityval N.F 40 ml","size":10611872},{"name":"Sédagel 75 ml","size":10447536},{"name":"Septiane Surgras Liquide 200 ml","size":4408488},{"name":"Sérozinc 150 ml","size":20016836}]},{"name":"EAU THERMALE","children":[{"name":"Eau Thermale 150 ml","size":4913216},{"name":"Eau Thermale 300 ml","size":6817349},{"name":"Eau Thermale 50 ml","size":21774536}]},{"name":"EFFACLAR","children":[{"name":"Eau Démaquillante Purifiante 200 ml","size":20443332},{"name":"Effaclar AI 15 ml","size":7137117},{"name":"Effaclar AI 30 ml","size":3888288},{"name":"Effaclar Gel nettoyant 150 ml","size":17080382},{"name":"Effaclar H 40 ml","size":11661575},{"name":"Effaclar K 30 ml","size":3072488},{"name":"Effaclar M 40 ml","size":6228950},{"name":"Hydratant Matité Active 40 ml","size":11888145},{"name":"Mousse 150 ml","size":6292720}]},{"name":"HYDRAPHASE","children":[{"name":"BR 24 Sachets bi-doses Hydraphase Masque  24 x 2 x 6 ml","size":4430480},{"name":"Hydraphase contour des yeux 15 ml","size":4751982},{"name":"Hydraphase Lait Démaquillant Hydratant 200 ml","size":11784210},{"name":"Hydraphase Légère 50 ml","size":11275095},{"name":"Hydraphase Riche 50 ml","size":3006696},{"name":"Hydraphase Tonique d'Eau Hydratant 200 ml","size":23568450},{"name":"Hydraphase XL 50 ml","size":8717896}]},{"name":"HYDREANE","children":[{"name":"Hydréane Légère  40 ml","size":2825550},{"name":"Hydréane Riche  40 ml","size":4709240}]},{"name":"MELA D ","children":[{"name":"Mela D Clarté  30 ml","size":10792083},{"name":"Mela-D Mains 50 ml","size":7867900},{"name":"Mela-D visage 30ml","size":17908904}]},{"name":"NUTRITIC ","children":[{"name":"Nutritic Lèvres 4,7 ml","size":2337740},{"name":"Nutritic Peaux sèches 40 ml","size":10977000},{"name":"Nutritic Peaux très sèches 40 ml","size":10098863}]},{"name":"REDERMIC","children":[{"name":"Redermic Peaux normales à mixtes 40 ml","size":4378350},{"name":"Redermic Peaux sèches 40 ml","size":4378480},{"name":"Redermic XL 40 ml","size":4607140},{"name":"Redermic Yeux 15 ml","size":12649476}]},{"name":"RESPECTISSIME","children":[{"name":"Démaquillant Yeux Waterproof 125 ml","size":21880674}]},{"name":"ROSALIAC","children":[{"name":"Rosaliac  XL 40 ml","size":10633176},{"name":"Rosaliac  XL réno 40 ml","size":14666490},{"name":"Rosaliac  XL Riche 40 ml","size":7822144},{"name":"Rosaliac 40 ml","size":20510516},{"name":"Rosaliac Gelée micellaire démaquillante 200 ml","size":11625012}]},{"name":"SHAMPOOINGS","children":[{"name":"Kerium  Anti Chute 125 ml","size":13539792},{"name":"Kerium Doux Extrême 200 ml 200 ml","size":8577968},{"name":"Kerium Doux Extrême 400 ml 400 ml","size":8577987},{"name":"Kerium DS 125 ml","size":10299648},{"name":"Kerium Pellicules grasses 200 ml","size":11213930},{"name":"Kerium Pellicules sèches 200 ml","size":8626080},{"name":"Normaker 200 ml","size":8470608}]},{"name":"SOINS CORPS ","children":[{"name":"Iso Uréa 200 ml","size":10308716},{"name":"Iso Uréa 400 ml","size":11245896},{"name":"Lipikar Baume  400 ml","size":3179876},{"name":"Lipikar Baume 200 ml","size":3790100},{"name":"Lipikar huile de bain 200 ml","size":5382951},{"name":"Lipikar Lait corporel 125 ml","size":9935895},{"name":"Lipikar Lait corporel 200 ml","size":11331712},{"name":"Lipikar Lait corporel 400 ml","size":9096228},{"name":"Lipikar Pain Surgras 150 g","size":21831824},{"name":"Lipikar Podologics 100 ml","size":8736466},{"name":"Lipikar Surgras Liquide 200 ml","size":9172317},{"name":"Lipikar Surgras Liquide 400 ml","size":12232696},{"name":"Lipikar Syndet 200 ml","size":12798384},{"name":"Lipikar Syndet 400 ml","size":16797900},{"name":"Xérand 75 ml","size":15119625},{"name":"Xéroderm 200 ml","size":11331696}]},{"name":"SOLAIRES ","children":[{"name":"Après Soleil  Posthélios  200ml","size":11212578},{"name":"Autobronzant Autohélios gel-crème 100ml","size":5462590},{"name":"Autobronzant Autohélios spray 125 ml","size":17168162},{"name":"IP 20 Crème Fondante  50 ml","size":6701715},{"name":"IP 20 Fluide Extrême Sans Parfum 50 ml","size":8173667},{"name":"IP 20 Spray  125ml","size":18615850},{"name":"IP 20 Spray  200 ml","size":6858838},{"name":"IP 30 Crème 50 ml","size":11758056},{"name":"IP 30 Fluide AC Peaux Grasses  50 ml","size":10524074},{"name":"IP 30 Gel Waterproof  100 ml","size":9308480},{"name":"IP 30 Lait 100 ml","size":10288341},{"name":"Ip 30 Spray 200 ml","size":2449580},{"name":"IP 40 Crème Fondante  50 ml","size":15595920},{"name":"IP 40 Fluide Extrême Sans Parfum 50 ml","size":14241384},{"name":"IP 40 Lait Velouté 100 ml","size":8659972},{"name":"IP 40 Spray Sans Parfum 125 ml","size":10917186},{"name":"IP 40 W gel Sans parfum Sans paraben 100 ml","size":11696955},{"name":"IP 50 + Anthélios stick  4 g","size":10519656},{"name":"IP 50 Antherpos crème 15 ml","size":15595272},{"name":"IP 50 Stick Zones Sensibles 9 g","size":10955775},{"name":"IP 50+ Spray 200 ml","size":13227705},{"name":"IP 50+ XL Crème Fondante Sans Paraben 50 ml","size":8612712},{"name":"IP 50+ XL Crème Fondante Sans Parfum 50 ml","size":3508344},{"name":"IP 50+ XL Crème teintée Sans Paraben 50 ml","size":4784830},{"name":"IP 50+ XL Crème teintée Sans Parfum 50 ml","size":9647990},{"name":"IP 50+ XL Fluide Extrême Corps 125 ml","size":5469408},{"name":"IP 50+ XL Fluide Extrême Sans Paraben 50 ml","size":11962025},{"name":"IP 50+ XL Fluide Extrême Sans Parfum 50 ml","size":10525056},{"name":"IP 50+ XL Lait Velouté  100 ml","size":3190502},{"name":"IP 50+ XL Spray Sans Parfum 125 ml","size":3944070}]},{"name":"SPECIALITES ","children":[{"name":"Cérat Inaltérable 45 g","size":8798944},{"name":"Cold Cream Naturel tube 100 ml","size":14398236},{"name":"Cold Cream Naturel tube 50 ml","size":14398254},{"name":"Effacné 2,5 S.S. liste II     TVA 5,5% 30 g","size":1519184},{"name":"Effacné 5 S.S. liste II   TVA 5,5% 30 g","size":1960734},{"name":"Onguent pot 100 ml","size":3690834}]},{"name":"SUBSTIANE","children":[{"name":"Substiane 40 ml","size":4072626},{"name":"Substiane XL 40 ml","size":10065342},{"name":"Substiane Yeux 15 ml","size":2939484}]},{"name":"TOILETTE PHYSIOLOGIQUE","children":[{"name":"Gel démaquillant 200 ml","size":6102278},{"name":"Lait démaquilant 200 ml","size":9857505},{"name":"Lotion apaisante  200 ml","size":8902925},{"name":"Solution micellaire 200 ml","size":11714425}]},{"name":"TOLERIANE","children":[{"name":"Pinceau Correcteur beige clair 1,5 ml","size":10570802},{"name":"Pinceau Correcteur beige foncé 1,5 ml","size":8630874},{"name":"Pinceau Correcteur jaune 1,5 ml","size":5274434},{"name":"Pinceau Correcteur vert 1,5 ml","size":4315455},{"name":"Tolériane crème 40 ml","size":3524845},{"name":"Tolériane Déodorant 40g","size":10052289},{"name":"Tolériane Dermo-nettoyant 200 ml","size":12003768},{"name":"Tolériane Respectissime dosettes 30x5ml","size":9822610},{"name":"Tolériane riche  40 ml","size":11466015},{"name":"Toleriane Teint Compact 11 9 g","size":3951486},{"name":"Toleriane Teint Compact 13 9 g","size":10098886},{"name":"Toleriane Teint Compact 15 9 g","size":3512664},{"name":"Toleriane Teint Fluide 11 30 ml","size":5269020},{"name":"Toleriane Teint Fluide 13 30 ml","size":5269032},{"name":"Toleriane Teint Fluide 15 30 ml","size":7903566},{"name":"Toleriane Teint Fluide 16 30 ml","size":4831849}]},{"name":"XY HOMME","children":[{"name":"Gel de rasage micro exfoliant 150 ml","size":7338495},{"name":"Gel hydratant  75 ml","size":2935416},{"name":"Mousse à raser sans savon 200 ml","size":13209264}]}]},{"name":"SANOFLORE","children":[{"name":"BEBE","children":[{"name":"Crème Hydratante Bébé","size":7047232},{"name":"Eau Nettoyante Bébé","size":1761800},{"name":"Gel Nettoyant Bébé","size":10130327},{"name":"Lait Bébé","size":9689922}]},{"name":"CORPS","children":[{"name":"Crème Mains et Ongles","size":2917788},{"name":"Déodorant Roll On","size":11834576},{"name":"Lait Hydratant Corps","size":8193114},{"name":"Sève Aroma Drainante","size":6261762}]},{"name":"EF","children":[{"name":"Bleuet","size":3083052},{"name":"Camomille","size":10570488},{"name":"Fleur d'oranger","size":1802732},{"name":"Hamamélis","size":3523504},{"name":"Lavande","size":13213170},{"name":"Rose","size":4506840}]},{"name":"HE ","children":[{"name":"Bergamote","size":2640402},{"name":"Bois de Rose type Brésil","size":6160966},{"name":"Cèdre","size":2640462},{"name":"Citron","size":3960702},{"name":"Citronnelle type Sri Lanka","size":7481343},{"name":"Cyprès","size":7481394},{"name":"Eucalyptus Globulus","size":7481462},{"name":"Eucalyptus Radiata","size":3960783},{"name":"Géranium type Bourbon","size":2200455},{"name":"Lavande Officinale","size":6601440},{"name":"Lavandin Super","size":7921746},{"name":"Mandarine Rouge","size":5721287},{"name":"Melaleuca Alternifolia","size":3080714},{"name":"Menthe Poivrée","size":10122392},{"name":"Orange Douce","size":4401080},{"name":"Pamplemousse","size":12763219},{"name":"Patchouli","size":9242352},{"name":"Pin Sylvestre","size":6161596},{"name":"Romarin Camphré type Espagne","size":11002900},{"name":"Ylang-Ylang complète","size":6161778}]},{"name":"SOINS","children":[{"name":"Aqua Melissae","size":6372478},{"name":"Baume Essentiel Anti Age Nuit","size":13205730},{"name":"Baume Lèvres","size":14633850},{"name":"Baume Végétal Nourrissant","size":6372562},{"name":"Contour des Yeux Aroma Energisant","size":1821464},{"name":"Crème Aroma Energisante","size":5919745},{"name":"Crème Elixir Anti-Age","size":2543274},{"name":"Crème Essentielle Anti Age","size":2732214},{"name":"Crème Jour Végétale Hydratante","size":6827715},{"name":"Fluide Hydra Matifiant","size":7741052},{"name":"Soin Essentiel Nutritif","size":9558864},{"name":"Soin Essentiel Régénérant","size":9562833},{"name":"Soin Yeux Anti-Age par acupression","size":7205960},{"name":"Stylo SOS Imperfections","size":9107200}]},{"name":"TISANES","children":[{"name":"Anti-Oxydante","size":12726450},{"name":"Bio Détente","size":10132144},{"name":"Détoxifiante","size":12335008},{"name":"Digestion ","size":8370146},{"name":"Eclat du teint ","size":10572936},{"name":"Jambes Légères","size":10132259},{"name":"Minceur ","size":7048608},{"name":"Soir ","size":5727046},{"name":"Transit ","size":8370355}]},{"name":"TOILETTE","children":[{"name":"Crème Gommante","size":2732184},{"name":"Démaquillant Yeux","size":7741154},{"name":"Gel Nettoyant Purifiant ","size":3404177},{"name":"Lait Démaquillant","size":9103560},{"name":"Lotion Florale","size":12750164},{"name":"Masque Aromatique","size":5008949},{"name":"Mousse Nettoyante","size":7285776}]},{"name":"VAPORISATEURS","children":[{"name":"Diffuseur électrique","size":2643366},{"name":"SOS Coup de Froid ","size":13682844},{"name":"SOS Pureté","size":3909400},{"name":"SOS Relaxation ","size":3420732}]}]},{"name":"VICHY","children":[{"name":"AMINCISSANTS","children":[{"name":"CELLU METRIC (2X 14sachets) 28X8ml","size":9267478},{"name":"COFFRET EDITION LIMITEE (Lipométric + Lipopeel) ","size":3108624},{"name":"LIPOCURE Sérum 100 ml","size":8413447},{"name":"LIPOMETRIC 200 ml ","size":1810916},{"name":"LIPOSTRECH Soin Gainant 200 ml ","size":6171998}]},{"name":"AQUALIA THERMAL","children":[{"name":"Baume Minéral 50 ml","size":4376898},{"name":"Crème Légère 40 ml","size":6924690},{"name":"Crème Riche 40 ml","size":5539740},{"name":"MAT 50 ml","size":11487576},{"name":"UV 15 50 ml","size":7658368}]},{"name":"AUTOBRONZANT","children":[{"name":"Lait Hydra bronzant 100 ml","size":7686856},{"name":"Lingette visage Peau claire 5,6 ml","size":4521650},{"name":"Lingette visage Peau mate 5,6 ml","size":4521670}]},{"name":"CAPITAL SOLEIL APRES SOLEIL","children":[{"name":"Baume de secours cellulaire 100 ml","size":13212210},{"name":"Soin lacté quotidien 100 ml","size":1761632},{"name":"Stick Ecran Zones Sensibles IP 50+ 9 grs","size":7389917}]},{"name":"CAPITAL SOLEIL GAMME ENFANTS","children":[{"name":"Lait Enfants IP 30 125 ml","size":5528481},{"name":"Lait Enfants Ip 50  150 ml","size":10953592},{"name":"Lait enfants IP 50+ 125 ml","size":7389968},{"name":"Spray enfants IP 30 TGM-Gachette 250 ml","size":12510890},{"name":"Spray enfants IP 50+ 125 ml","size":4985739},{"name":"Spray Enfants IP50+ 125 ml","size":4634168},{"name":"Spray multi positions  IP30 200 ml","size":6319365}]},{"name":"CAPITAL SOLEIL LAITS PROTECTEURS","children":[{"name":"Lait IP 50+  tube 100 ml","size":8259395},{"name":"Lait IP 50+ Anti-réactions 100 ml","size":7046448},{"name":"Lait-Gel IP 20 125 ml","size":7289549},{"name":"Lait-Gel IP 30 125 ml ","size":7718364}]},{"name":"CAPITAL SOLEIL SPRAYS PROTECTEURS","children":[{"name":"Spray homme IP 30 125 ml","size":9065020},{"name":"Spray IP 20 125 ml","size":21104776},{"name":"Spray IP 30 125 ml","size":21369096},{"name":"Spray IP 50+ 125 ml","size":10129292},{"name":"Spray multi positions  IP30 125 ml","size":4212870}]},{"name":"CAPITAL SOLEIL VISAGE","children":[{"name":"Crème Fraîcheur IP 30 50 ml","size":2355615},{"name":"Crème Fraîcheur IP 50+ 50 ml","size":1884488},{"name":"Crème IP 30 50 ml","size":11056990},{"name":"Crème IP 50+ 50 ml","size":12606387},{"name":"Crème IP 50+ Anti-réactions 50 ml","size":10129223},{"name":"Crème Pro Densité IP 30 50 ml","size":2266260},{"name":"Micro Fluide Mat Shaka IP 30 40 ml","size":11474304},{"name":"Micro Fluide Mat Shaka IP 50+ 40 ml","size":9998146}]},{"name":"CELLEBIOTIC","children":[{"name":"Soin Jour  50 ml","size":9405560},{"name":"Soin Nuit 50 ml","size":9772820}]},{"name":"DEODORANTS","children":[{"name":"ANTI TRANSPIRANT Aérosol 125 ml","size":20046364},{"name":"ANTI TRANSPIRANT Bille 50 ml","size":16191567},{"name":"ANTI TRANSPIRANT Crème 30 ml","size":8481198},{"name":"Anti Transpirant Vapo Fraicheur 100 ml","size":9255324},{"name":"Anti-Transpirant 48H Bille peaux Sensibles 50 ml","size":12778209},{"name":"DEODORANT 3 S 24H Bille Peaux très Sensibles  50 ml","size":11867150},{"name":"DEODORANT 3 S 24H Stick Peaux très Sensibles  40 ml","size":8069645},{"name":"PEAU TRES SENSIBLE Bille 50 ml","size":12336336},{"name":"PEAU TRES SENSIBLE Crème 30 ml","size":6168184},{"name":"PEAU TRES SENSIBLE Stick 40 ml","size":9252240}]},{"name":"DEPILATOIRES","children":[{"name":"Cire dermo-tolérance 6 bandes 18 grs","size":13205556},{"name":"Crème dermo-tolérance GM 150 ml","size":22009230}]},{"name":"DERCOS","children":[{"name":"Aminexyl Energy ","size":5182320},{"name":"Antipellicules grasses 200 ml ","size":18449856},{"name":"Antipellicules sèches  200 ml ","size":23062350},{"name":"Dermo Apaisant cheveux normaux à gras 200 ml ","size":23467830},{"name":"Dermo Apaisant cheveux normaux à secs 200 ml ","size":17209764},{"name":"Energisant à l'Aminexil 200 ml ","size":12382562},{"name":"Fréquence pureté (cheveux regraissants)  400 ml ","size":12246724},{"name":"Fréquence vitalité (cheveux fragiles) 400 ml","size":4811224},{"name":"NEW Antipelliculaire Fortifiant 200 ml","size":4193217},{"name":"NEW Antipelliculaire Normalisant PELL GRASSES 200 ml","size":11647800},{"name":"NEW Antipelliculaire Nutritif PELL SECHES 200 ml","size":13511506},{"name":"Nutri-réparateur au collagène 200 ml ","size":23490120},{"name":"Soin Après-Shampooing Nutri-Réparateur 150 ml","size":11324040},{"name":"Traitant sébo-correcteur 200 ml ","size":8740620},{"name":"Traitement Anti-chute Femme 18x6ml","size":15919180},{"name":"Traitement Anti-chute Homme 18x6ml","size":23878710},{"name":"Volumateur 200 ml ","size":7083520}]},{"name":"KIT RAJEUNISSANT","children":[{"name":"Kit Peel ","size":12067216}]},{"name":"LIFT ACTIV","children":[{"name":"Liftactiv Pro CxP Yeux 15ml","size":10752170},{"name":"Liftactiv Rétinol HA Soin Jour ","size":6784976},{"name":"Liftactiv Rétinol HA Soin Yeux ","size":4240600},{"name":"Serum 30 ml","size":9281040},{"name":"Soin contour des Yeux 15 ml","size":8713960},{"name":"Soin CxP Jour Peaux  Sèches  50 ml","size":8220112},{"name":"Soin CxP Jour Peaux Normales  50 ml","size":5802444},{"name":"Soin CxP Nuit  50 ml","size":4351842},{"name":"Soin Nuit  50 ml","size":9658660},{"name":"Soin Peaux Normales 50 ml","size":3998390},{"name":"Soin Peaux Sèches 50 ml","size":13594560}]},{"name":"LIPIDIOSE","children":[{"name":"Action Intégrale Vergetures 125 ml","size":5058662},{"name":"Action intégrale vergetures 200 ml","size":1685092},{"name":"Crème Bi- Exfoliante 200 ml ","size":11765150},{"name":"Lèvres 3 ml","size":17071230},{"name":"Lipidiose 1 400 ml","size":3963591},{"name":"Lipidiose 2 400 ml","size":13212000},{"name":"Mains 50 ml","size":3067824},{"name":"Nutri Sun 200 ml ","size":3250422},{"name":"Nutritive Crème 200 ml","size":11764800},{"name":"Nutritive Crème 400 ml","size":13203820},{"name":"Nutritive Fluide  200 ml","size":2352965},{"name":"Nutritive Fluide  400 ml","size":9431320}]},{"name":"MYOKINE","children":[{"name":"Soin  50 ml","size":5459272},{"name":"Soin coutour des Yeux 15 ml","size":23969490},{"name":"Soin Nuit 50ml","size":2240435}]},{"name":"NEOVADIOL","children":[{"name":"Soin Contours Lèvres et Yeux 15 ml","size":11356228},{"name":"Soin de Jour 50 ml","size":3575960},{"name":"Soin Nuit  50 ml","size":6704940},{"name":"Soin Peaux Sèches 50 ml","size":1787988},{"name":"Ultra Densifieur Eclat Anti-taches 40 ml","size":14466330}]},{"name":"NORMADERM","children":[{"name":"NEW Soin hydratant anti-imperfection 50 ml","size":14046768},{"name":"Soin hydratant anti-imperfection 50 ml","size":10157888}]},{"name":"NORMADERM PROMAT","children":[{"name":"Concentré anti-imperfection ","size":9590976},{"name":"Gel exfoliant nettoyant quotidien 125 ml","size":17303330},{"name":"Gel nettoyant purifiant 200 ml ","size":8306914},{"name":"Kit Rénovateur ","size":8299466},{"name":"Lacto Gelée 200 ml ","size":2749056},{"name":"Nuit 50 ml","size":1770888},{"name":"Stick asséchant camouflant ","size":17168338},{"name":"Tonique astringent purifiant 200 ml ","size":10925292}]},{"name":"NOVADIOL","children":[{"name":"Soin Anti-Taches 50 ml","size":14239026}]},{"name":"NUTRILOGIE","children":[{"name":"Lèvres 15 ml","size":14623958},{"name":"NUTRILOGIE 1 50 ml","size":15704409},{"name":"NUTRILOGIE 2 50 ml","size":11965280}]},{"name":"OLIGO 25","children":[{"name":"Eau moussante nettoyante anti-teint terne 100 ml","size":21884632},{"name":"OLIGO 25 PN et M 50 ml","size":18449928},{"name":"OLIGO 25 PS 50 ml","size":16143666},{"name":"Soin contour des Yeux 4 ml","size":9391836}]},{"name":"PHYSIO 5,5","children":[{"name":"Gel Douche 400 ml","size":10393272},{"name":"Lait Hydratant 400 ml","size":3897441}]},{"name":"PODEXINE","children":[{"name":"Correcteur Callosités 50 ml","size":4745565},{"name":"Gommage Kérato-réducteur 75 ml","size":2724024},{"name":"Réparateur Crevasses 30 ml","size":9491108},{"name":"Soin anti-transpirant 50 ml","size":9059673},{"name":"Soin reconstituant Pieds Secs 100 ml ","size":5608356}]},{"name":"PURETE THERMALE","children":[{"name":"Atomiseur Eau Thermale  150 ml","size":5022003},{"name":"Crème Moussante Détoxifiante 125 ml","size":10725820},{"name":"Démaquillant intégral 3 en 1 200 ml ","size":14816949},{"name":"Eau tonique hydra-apaisante 200 ml ","size":10896312},{"name":"Eau tonique hydra-perfectrice 200 ml ","size":11350275},{"name":"Exfoliant Crème détoxifiant 75 ml","size":16155741},{"name":"Gel Mousse de nettoyage à l’eau détoxifiante 125 ml","size":11723880},{"name":"Lait Démaquillant détoxifiant PNM 200 ml ","size":9080140},{"name":"Lait Démaquillant détoxifiant PS 200 ml ","size":10442207},{"name":"Lotion démaquillante Yeux sensibles 150 ml","size":18845800},{"name":"Solution Micellaire  200 ml ","size":8626095},{"name":"Solution Micellaire  400 ml","size":3632048}]},{"name":"SKIN SET","children":[{"name":"Lacto mousse dermo-nettoyante 150 ml","size":12329128},{"name":"Soin hydratant stabilisant 50 ml","size":4403270}]},{"name":"Soin Yeux Roll On ","children":[{"name":"Soin Yeux 15ml","size":12444900}]},{"name":"THERMAL FIX","children":[{"name":"Concentré 30 ml","size":4470780},{"name":"FIX MAT 50 ml","size":3866022},{"name":"MASQUE réhydratant 50 ml","size":10892520},{"name":"Soin contour des Yeux 15 ml","size":11637243}]},{"name":"VICHY HOMME","children":[{"name":"Déo Bille Anti-Transpirant Peaux Sensibles 50 ml","size":5265205},{"name":"Déo bille Peau Sensible  Anti-transpirant 50 ml","size":9094388},{"name":"Déo Vaporisateur Ultra Frais Régulation Intense 100 ml","size":3350578},{"name":"Déodorant Bille Peaux Sensibles 50 ml","size":7691080},{"name":"Déodorant Bille Régulation Intense 50 ml","size":6152872},{"name":"Déodorant Vapo Régulation Intense 100 ml","size":9229320},{"name":"Eau Tonic 100 ml","size":13396918},{"name":"Gel de rasage Peaux Sensibles 150 ml","size":3560136},{"name":"Gel Douche Hydra Mag C corps et cheveux 200 ml","size":11966275},{"name":"Gel Douche MAG C Corps et Cheveux 200 ml ","size":19781125},{"name":"Gel Nettoyant Purifiant 125 ml","size":2660046},{"name":"Gel nettoyant Purifiant 125 ml","size":1773364},{"name":"Hydra Mag C 50 ml","size":1854804},{"name":"Hydra MAG Stick yeux 4 ml","size":12988259},{"name":"Hydra MAG Stick yeux 4 ml","size":6718065},{"name":"Mousse à raser Dermopurifiante Peaux à problèmes 200 ml ","size":6516832},{"name":"Mousse à raser Peaux Sensibles 200 ml ","size":10235368},{"name":"Mousse à raser Sans Savon 200 ml","size":11707800},{"name":"Normativ Cg  50 ml","size":13911000},{"name":"Reti-Fill 50 ml","size":2338720},{"name":"Sensi Baume 75 ml","size":11118768},{"name":"Structure S 50 ml","size":7882883}]}]}]};
+
+  } else {
+
+    root = node; // JSON.parse(document.getElementById("resultats").value);
+
+  }
+
+  //clearing variabes
+
+  var removed = d3.selectAll("svg").remove();
+  removed.remove();
+
+  // Breadcrumb dimensions: width, height, spacing, width of tip/tail.
+  var b = {
+    w: 150, h: 30, s: 3, t: 10
+  };
+
+
+  var scale = 2.2,
+      width = 760,
+      height = 760,
+      radius = Math.min(width, height) / scale;
+
+  var x = d3.scale.linear()
+      .range([0, 2 * Math.PI]);
+
+  var y = d3.scale.linear()
+      .range([0, radius]);
+
+  var color = d3.scale.category20c();
+
+  var svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height)
+      .append("g")
+      .attr("transform", "translate(" + width / scale + "," + height / scale + ")");
+
+  var partition = d3.layout.partition()
+      .value(function(d) { return d.size; });
+
+  var arc = d3.svg.arc()
+      .startAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x))); })
+      .endAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x + d.dx))); })
+      .innerRadius(function(d) { return Math.max(0, y(d.y)); })
+      .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
+
+  var g = svg.selectAll("g")
+    .data(partition.nodes(root))
+    .enter().append("g");
+
+  var path = g.append("path")
+    .attr("d", arc)
+    .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
+    .on("click", click)
+    .on("mouseover", mouseover);
+
+  var text = g.append("text")
+    .attr("transform", function(d) { return "rotate(" + computeTextRotation(d) + ")"; })
+    .attr("x", function(d) { return y(d.y); })
+    .attr("dx", "6") // margin
+    .attr("dy", ".35em") // vertical-align
+    .attr("visibility",function(d) { return d.dx < 0.01? "hidden" : "visible"})
+    .text(function(d) { return d.name; });
+
+  function click(d) {
+      var total = d.dx;
+
+      // fade out all text elements
+      text.transition().attr("opacity", 0);
+
+      path.transition()
+         .duration(750)
+         .attrTween("d", arcTween(d))
+         .each("end", function(e, i) {
+             // check if the animated element's data e lies within the visible angle span given in d
+             if (e.x >= d.x && e.x < (d.x + d.dx)) {
+             // get a selection of the associated text element
+             var arcText = d3.select(this.parentNode).select("text");
+              // fade in the text element and recalculate positions
+              arcText.transition()
+              .attr("opacity", 1)
+
+              .attr("transform", function() { return "rotate(" + computeTextRotation(e) + ")" })
+              .attr("x", function(d) { return y(d.y); })
+              .attr("visibility",function(d) { return d.dx/total < 0.01? "hidden" : "visible"});
+        }
+    });
+  }
+
+  d3.select(self.frameElement).style("height", height + "px");
+
+  // Interpolate the scales!
+  function arcTween(d) {
+    var xd = d3.interpolate(x.domain(), [d.x, d.x + d.dx]),
+        yd = d3.interpolate(y.domain(), [d.y, 1]),
+        yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
+    return function(d, i) {
+      return i
+          ? function(t) { return arc(d); }
+          : function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
+    };
+  }
+
+  // Adapte Text while rotating
+  function computeTextRotation(d) {
+    return (x(d.x + d.dx / 2) - Math.PI / 2) / Math.PI * 180;
+  }
+
+  // Switching from size to count
+
+  d3.selectAll("input").on("change", function change() {
+    var value = this.value === "count"
+        ? function() { return 1; }
+        : function(d) { return d.size; };
+
+    path
+        .data(partition.value(value).nodes)
+        .transition()
+        .duration(1000)
+        .attrTween("d", arcTweenData(d,i));
+  });
+
+  function arcTweenData(a, i) {
+    var oi = d3.interpolate({x: a.x0, dx: a.dx0}, a);
+    function tween(t) {
+      var b = oi(t);
+      a.x0 = b.x;
+      a.dx0 = b.dx;
+      return arc(b);
+    }
+    if (i == 0) {
+     // If we are on the first arc, adjust the x domain to match the root node
+     // at the current zoom level. (We only need to do this once.)
+      var xd = d3.interpolate(x.domain(), [node.x, node.x + node.dx]);
+      return function(t) {
+        x.domain(xd(t));
+        return tween(t);
+      };
+    } else {
+      return tween;
+    }
+  }
+
+  /////////////////////////
+  // Breadcrumbs Manager //
+  /////////////////////////
+
+  // Get total size of the tree = value of root node from partition.
+  totalSize = path.node().__data__.value;
+
+  function initializeBreadcrumbTrail() {
+
+  // Add the svg area.
+  var trail = d3.select("#sequence").append("svg:svg")
+      .attr("width", width)
+      .attr("height", 30)
+      .attr("id", "trail");
+  // Add the label at the end, for the percentage.
+  trail.append("svg:text")
+    .attr("id", "endlabel")
+    .style("fill", "#000");
+  }
+
+  // Fade all but the current sequence, and show it in the breadcrumb trail.
+  function mouseover(d) {
+    var percentage = (100 * d.value / totalSize).toPrecision(3);
+    var d_value = numeral(d.value).format('0,0.00');
+    var percentageString = " € " + d_value + "  / " + percentage + " %";
+    var sequenceArray = getAncestors(d);
+    updateBreadcrumbs(sequenceArray, percentageString);
+  }
+
+
+  // Generate a string that describes the points of a breadcrumb polygon.
+  function breadcrumbPoints(d, i) {
+    var points = [];
+    points.push("0,0");
+    points.push(b.w + ",0");
+    points.push(b.w + b.t + "," + (b.h / 2));
+    points.push(b.w + "," + b.h);
+    points.push("0," + b.h);
+    if (i > 0) { // Leftmost breadcrumb; don't include 6th vertex.
+      points.push(b.t + "," + (b.h / 2));
+    }
+    return points.join(" ");
+  }
+
+  // Given a node in a partition layout, return an array of all of its ancestor
+  // nodes, highest first, but excluding the root.
+  function getAncestors(node) {
+    var path = [];
+    var current = node;
+    while (current.parent) {
+      path.unshift(current);
+      current = current.parent;
+    }
+    return path;
+  }
+
+  // Update the breadcrumb trail to show the current sequence and percentage.
+  function updateBreadcrumbs(nodeArray, percentageString) {
+
+  // Data join; key function combines name and depth (= position in sequence).
+  var g = d3.select("#trail")
+      .selectAll("g")
+      .data(nodeArray, function(d) { return d.name + d.depth; });
+
+  // Add breadcrumb and label for entering nodes.
+  var entering = g.enter().append("svg:g");
+
+  entering.append("svg:polygon")
+      .attr("points", breadcrumbPoints)
+      .style("fill", function(d) { return color((d.children ? d : d.parent).name); });
+
+  entering.append("svg:text")
+      .attr("x", (b.w + b.t) / 2)
+      .attr("y", b.h / 2)
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "middle")
+      .text(function(d) { return d.name.substring(0,20); });
+
+  // Set position for entering and updating nodes.
+  g.attr("transform", function(d, i) {
+    return "translate(" + i * (b.w + b.s) + ", 0)";
+  });
+
+  // Remove exiting nodes.
+  g.exit().remove();
+
+  // Now move and update the percentage at the end.
+  d3.select("#trail").select("#endlabel")
+      .attr("x", (nodeArray.length + 0.5) * (b.w + b.s))
+      .attr("y", b.h / 2)
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "middle")
+      .text(percentageString);
+  }
+
+  initializeBreadcrumbTrail();
+
+ }
+
+</script>
+
+
